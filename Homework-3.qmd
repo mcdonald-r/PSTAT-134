@@ -1,0 +1,426 @@
+---
+title: "Homework 3"
+author: "PSTAT 134/234"
+format:
+  html:
+    toc: true
+    toc-location: left
+    toc-depth: 4
+    embed-resources: true
+    theme: simplex
+editor: visual
+---
+
+## Homework 3
+
+![Star Trek ships.](star_trek.jpeg)
+
+For this homework assignment, we'll be working with a dataset called [Spaceship Titanic](https://www.kaggle.com/competitions/spaceship-titanic/overview). It is a simulated dataset used for a popular Kaggle competition, intended to be similar to the very famous Titanic dataset. The premise of the Spaceship Titanic data is that it is currently the year 2912. You have received a transmission from four lightyears away, sent by the Spaceship Titanic, which was launched a month ago.
+
+The Titanic set out with about 13,000 passengers who were emigrating from our solar system to three newly habitable exoplanets. However, it collided with a spacetime anomaly hidden in a dust cloud, and as a result, although the ship remained intact, half of the passengers on board were transported to an alternate dimension. Your challenge is to predict which passengers were transported, using records recovered from the spaceship's damaged computer system.
+
+The dataset is provided in `/data`, along with a codebook describing each variable. You should read the dataset into your preferred coding language (R or Python) and familiarize yourself with each variable.
+
+We will use this dataset for the purposes of practicing our data visualization and feature engineering skills.
+
+```{r}
+library(tidyverse)
+library(naniar)
+library(dplyr)
+library(ggcorrplot)
+
+spaceship_data <- read_csv("data/spaceship_titanic.csv")
+
+# Original dataset for reference and testing purposes
+ref_spaceship_data <- read_csv("data/spaceship_titanic.csv")
+```
+
+### Exercise 1
+
+Which variables have missing values? What percentage of these variables is missing? What percentage of the overall dataset is missing?
+
+```{r}
+vis_miss(spaceship_data)
+```
+
+Variables with missing values (% Missing):
+
+-   HomePlanet (2%)
+
+-   CryoSleep (2%)
+
+-   Cabin (2%)
+
+-   Destination (2%)
+
+-   Age (2%)
+
+-   VIP (2%)
+
+-   RoomService (2%)
+
+-   FoodCourt (2%)
+
+-   ShoppingMall (2%)
+
+-   Spa (2%)
+
+-   VRDeck (2%)
+
+-   Name (2%)
+
+From the overall dataset 1.9% of all the data is missing.
+
+### Exercise 2
+
+Use mode imputation to fill in any missing values of `home_planet`, `cryo_sleep`, `destination`, and `vip`. Drop any observations with a missing value of `cabin` (there are too many possible values).
+
+Use median imputation to fill in any missing values of `age`. Rather than imputing with the overall mean of `age`, impute with the median age of the corresponding `vip` group. (For example, if someone who is a VIP is missing their age, replace their missing age value with the median age of all passengers who are **also** VIPs).
+
+For passengers missing any of the expenditure variables (`room_service`, `food_court`, `shopping_mall`, `spa`, or `vr_deck`), handle them in this way:
+
+-   If all their observed expenditure values are $0$, **or** if they are in cryo-sleep, replace their missing value(s) with $0$.
+
+-   For the remaining missing expenditure values, use mean imputation.
+
+```{r}
+spaceship_data <- spaceship_data %>%
+  filter(!is.na(Cabin)) %>% 
+  mutate(
+    homeplanet_mode = names(sort(table(na.omit(HomePlanet)), decreasing = TRUE))[1],
+    HomePlanet = ifelse(is.na(HomePlanet), homeplanet_mode, HomePlanet)
+  ) %>%
+  select(-homeplanet_mode) %>% 
+  mutate(
+    cryosleep_mode = names(sort(table(na.omit(CryoSleep)), decreasing = TRUE))[1],
+    CryoSleep = ifelse(is.na(CryoSleep), cryosleep_mode, CryoSleep)
+  ) %>% 
+  select(-cryosleep_mode) %>% 
+  mutate(
+    destination_mode = names(sort(table(na.omit(Destination)), decreasing = TRUE))[1],
+    Destination = ifelse(is.na(Destination), destination_mode, Destination)
+  ) %>% 
+  select(-destination_mode) %>% 
+  mutate(
+    vip_mode = names(sort(table(na.omit(VIP)), decreasing = TRUE))[1],
+    VIP = ifelse(is.na(VIP), vip_mode, VIP)
+  ) %>% 
+  select(-vip_mode)
+
+spaceship_data <- spaceship_data %>% 
+  group_by(VIP) %>% 
+  reframe(age_median = median(Age, na.rm = T),
+            across(.cols = everything())) %>%
+  mutate(Age = case_when(
+    is.na(Age) ~ age_median,
+    .default = Age
+  )) %>%
+  select(-age_median)
+
+spaceship_data <- spaceship_data %>% 
+  mutate(RoomService = ifelse(is.na(RoomService) & 
+      (rowSums(select(., RoomService, FoodCourt, ShoppingMall, Spa, VRDeck), na.rm = TRUE) == 0 | CryoSleep == TRUE),
+      0, RoomService)) %>%
+  mutate(RoomService = ifelse(is.na(RoomService), mean(RoomService, na.rm = TRUE), RoomService)) %>% 
+  mutate(FoodCourt = ifelse(is.na(FoodCourt) & 
+      (rowSums(select(., RoomService, FoodCourt, ShoppingMall, Spa, VRDeck), na.rm = TRUE) == 0 | CryoSleep == TRUE),
+      0, FoodCourt)) %>%
+  mutate(FoodCourt = ifelse(is.na(FoodCourt), mean(FoodCourt, na.rm = TRUE), FoodCourt)) %>% 
+  mutate(ShoppingMall = ifelse(is.na(ShoppingMall) & 
+      (rowSums(select(., RoomService, FoodCourt, ShoppingMall, Spa, VRDeck), na.rm = TRUE) == 0 | CryoSleep == TRUE),
+      0, ShoppingMall)) %>%
+  mutate(ShoppingMall = ifelse(is.na(ShoppingMall), mean(ShoppingMall, na.rm = TRUE), ShoppingMall)) %>% 
+  mutate(Spa = ifelse(is.na(Spa) & 
+      (rowSums(select(., RoomService, FoodCourt, ShoppingMall, Spa, VRDeck), na.rm = TRUE) == 0 | CryoSleep == TRUE),
+      0, Spa)) %>%
+  mutate(Spa = ifelse(is.na(Spa), mean(Spa, na.rm = TRUE), Spa)) %>% 
+  mutate(VRDeck = ifelse(is.na(VRDeck) & 
+      (rowSums(select(., RoomService, FoodCourt, ShoppingMall, Spa, VRDeck), na.rm = TRUE) == 0 | CryoSleep == TRUE),
+      0, VRDeck)) %>%
+  mutate(VRDeck = ifelse(is.na(VRDeck), mean(VRDeck, na.rm = TRUE), VRDeck))
+```
+
+### Exercise 3
+
+What are the proportions of both levels of the outcome variable, `transported`, in the dataset?
+
+```{r}
+sum(spaceship_data$Transported == 'TRUE') # 4,278
+sum(spaceship_data$Transported == 'FALSE') # 4,216
+```
+
+The proportion between the levels in `transported` are almost 50/50 with those being True with a count of 4,278 and those being False being 4,216. The exact proportion is True: 0.503649635, False: 0.496350365.
+
+### Exercise 4
+
+Make proportion stacked bar charts of each of the following. Describe what patterns, if any, you observe.
+
+1.  `home_planet` and `transported`
+
+2.  `cryo_sleep` and `transported`
+
+3.  `destination` and `transported`
+
+4.  `vip` and `transported`
+
+```{r}
+spaceship_data %>% ggplot(aes(x = HomePlanet, fill = Transported)) +
+  geom_bar(position = "fill") + 
+  labs(
+    title = "Home Planet vs. Transported",
+    x = "Home Planet",
+    y = "Proportion"
+  )
+
+spaceship_data %>% ggplot(aes(x = CryoSleep, fill = Transported)) +
+  geom_bar(position = "fill") + 
+  labs(
+    title = "Cryo-Sleep vs. Transported",
+    x = "Cryo-Sleep",
+    y = "Proportion"
+  )
+
+spaceship_data %>% ggplot(aes(x = Destination, fill = Transported)) +
+  geom_bar(position = "fill") + 
+  labs(
+    title = "Destination vs. Transported",
+    x = "Destination",
+    y = "Proportion"
+  )
+
+spaceship_data %>% ggplot(aes(x = VIP, fill = Transported)) +
+  geom_bar(position = "fill") + 
+  labs(
+    title = "Vip vs. Transported",
+    x = "VIP",
+    y = "Proportion"
+  )
+```
+
+In the first graph, we can see how most people from the planet Europa and being transported to another dimension, while people from Earth were least likely to be transported to another dimension. In the second graph, we can see how most people being transported while in a stage of cryo-sleep. In the third graph, most people being transported to another dimension have their destination set for 55 Cancri e and as for the destination with the least amount of people being transported to another dimenension was the planet TRAPPIST-1e. For the last graph, the difference between if a person was VIP or not didn't play that significant a role, however, most people that were VIP didn't transport to another dimension most of the time and those that weren't VIP it was almost 50/50 whether or not they transported to another dimension.
+
+### Exercise 5
+
+Using box plots, density curves, histograms, dot plots, or violin plots, compare the distributions of the following and describe what patterns you observe, if any.
+
+1.  `age` across levels of `transported`
+
+2.  `room_service` across levels of `transported`
+
+3.  `spa` across levels of `transported`
+
+4.  `vr_deck` across levels of `transported`
+
+```{r}
+spaceship_data %>% ggplot(aes(x = Transported, y = Age, fill = Transported)) +
+  geom_violin() + 
+  labs(
+    title = "Age vs. Transported",
+    y = "Age",
+    x = "Transported"
+  )
+
+spaceship_data %>% ggplot(aes(x = RoomService, color = Transported)) +
+  geom_density(linewidth = 0.75) + 
+  labs(
+    title = "Room Service vs. Transported",
+    y = "Room Service",
+    x = "Transported"
+  )
+
+spaceship_data %>% ggplot(aes(x = Spa, color = Transported)) +
+  geom_density(linewidth = 0.75) + 
+  labs(
+    title = "Spa vs. Transported",
+    y = "Spa",
+    x = "Transported"
+  )
+
+spaceship_data %>% ggplot(aes(x = VRDeck, color = Transported)) +
+  geom_density(linewidth = 0.75) + 
+  labs(
+    title = "VR-Deck vs. Transported",
+    y = "VR-Deck",
+    x = "Transported"
+  )
+```
+
+Taking a look at the first graph, the distributions are relatively the same, but apon closer examination you can see how there are more children in the age ranges of 0-10 that are transported to another dimension. A pretty small distinction can also be made in the ages just around 26, more people are transported to another dimension. For the next 3 graphs they are extremely similar, because most people are not spending that much money if any at during their time on the spaceship. For that reason, all of the density charts look almost identical with a majority of purchases totalling zero in all of the different 3 purchasing choices examined, however, between the difference of those being transported to another dimension we can see that those that aren't being transported to another dimension do spend more that those that are through all of the categories.
+
+### Exercise 6
+
+Make a correlogram of the continuous variables in the dataset. What do you observe?
+
+```{r}
+corr_data <- spaceship_data %>% select(where(is.numeric))
+
+corr <- round(cor(corr_data), 1)
+
+ggcorrplot(corr,
+           type = "lower",
+           lab = TRUE,
+           lab_size = 3,
+           method = "circle",
+           title = "Correlogram of Spaceship Data")
+
+# The variables that are the most closely correlated are the Spa and Foodcourt,
+# Spa and VRDeck, and last VRDeck and Foodcourt. 
+```
+
+From the correlation graph we are able to get a good amount of information, we can see that the variables Spa and VRDeck positively correlate with the FoodCourt variable. Spa and VRDeck also had the same strength of correlation as the previous relationship mentioned. As for the other ones they aren't as strong as the first relationships, but in the graph you can see that age does correlate with all the variables except for the shopping mall, and the only other variable that did have a correlation with the shopping mall was room service.
+
+### Exercise 7
+
+Use binning to divide the feature `age` into six groups: ages 0-12, 13-17, 18-25, 26-30, 31-50, and 51+.
+
+```{r}
+spaceship_data <- spaceship_data %>%
+  mutate(age_group = case_when(
+    Age >= 0 & Age <= 12  ~ "0-12",
+    Age >= 13 & Age <= 17 ~ "13-17",
+    Age >= 18 & Age <= 25 ~ "18-25",
+    Age >= 26 & Age <= 30 ~ "26-30",
+    Age >= 31 & Age <= 50 ~ "31-50",
+    Age >= 51             ~ "51+",
+  )) %>%
+  mutate(age_group = factor(age_group, levels = c("0-12", "13-17", "18-25", "26-30", "31-50",
+                                                  "51+")))
+```
+
+### Exercise 8
+
+For the expenditure variables, do the following:
+
+-   Create a new feature that consists of the total expenditure across all five amenities;
+
+-   Create a binary feature to flag passengers who did not spend anything (a total expenditure of 0);
+
+-   Log-transform the total expenditure to reduce skew.
+
+```{r}
+spaceship_data <- spaceship_data %>%
+  mutate(total_expenditure = RoomService + FoodCourt + ShoppingMall + Spa + VRDeck) %>%
+  mutate(no_expenditure = if_else(total_expenditure == 0, 1, 0)) %>%
+  mutate(log_total_expenditure = if_else(total_expenditure > 0, log(total_expenditure), NA_real_))
+```
+
+### Exercise 9
+
+Using the `passenger_id` column, create a new binary-coded feature that represents whether a passenger was traveling alone or not. Make a proportion stacked bar chart of this feature and `transported`. What do you observe?
+
+```{r}
+spaceship_data <- spaceship_data %>%
+  mutate(group_id = sub("_.*", "", PassengerId)) %>% 
+  group_by(group_id) %>%
+  mutate(traveling_alone = if_else(n() == 1, "Alone", "Not Alone")) %>%
+  ungroup() %>%
+  select(-group_id)
+
+spaceship_data %>% ggplot(aes(x = Transported, fill = traveling_alone)) +
+  geom_bar(position = "fill") +
+  labs(
+    title = "Proportion of Passengers Traveling Alone vs. Transported",
+    x = "Transported",
+    y = "Proportion",
+    fill = 'Traveling Alone'
+  )
+```
+
+From this graph I can observe that when people are being transported to another dimension it is basically a coin flip if they are traveling either alone or with other people. When people aren't being transported to another dimension, it is more likely that they are traveling alone with a proportion of just above 0.6 of people traveling alone than not alone.
+
+### Exercise 10
+
+Using the `cabin` variable, extract:
+
+1.  Cabin deck (A, B, C, D, E, F, G, or T);
+2.  Cabin number (0 to 2000);
+3.  Cabin side (P or S).
+
+Then do the following:
+
+-   Drop any observations with a cabin deck of T;
+
+-   Bin cabin number into groups of 300 (for example, 0 - 300, 301 - 600, 601- 900, etc.).
+
+```{r}
+spaceship_data <- spaceship_data %>%
+  separate(Cabin, into = c("deck", "num", "side"), sep = "/", convert = TRUE) %>%
+  filter(deck != "T") %>%
+  mutate(cabin_num_group = case_when(
+    num >= 0 & num <= 300   ~ "0-300",
+    num >= 301 & num <= 600 ~ "301-600",
+    num >= 601 & num <= 900 ~ "601-900",
+    num >= 901 & num <= 1200 ~ "901-1200",
+    num >= 1201 & num <= 1500 ~ "1201-1500",
+    num >= 1501             ~ "1501+"
+  )) %>%
+  mutate(cabin_num_group = 
+           factor(cabin_num_group, levels = 
+                                    c("0-300", "301-600", "601-900", "901-1200", 
+                                      "1201-1500", "1501+")))
+```
+
+### Exercise 11
+
+Create a new data frame (or tibble) that retains the following features:
+
+1.  `home_planet`
+2.  cabin deck
+3.  cabin number (binned)
+4.  cabin side
+5.  `age` (binned)
+6.  total expenditures (log-transformed)
+7.  `cryo_sleep`
+8.  `destination`
+9.  whether the passenger was traveling alone (call this `solo`)
+
+To those features, do the following:
+
+-   One-hot encode all categorical features
+
+-   Center and scale all continuous features
+
+```{r}
+final_spaceship_data <- spaceship_data %>%
+  select(HomePlanet, deck, num, side, age_group, total_expenditure, CryoSleep, Destination, traveling_alone)
+
+final_spaceship_data <- final_spaceship_data %>%
+  mutate(across(c(HomePlanet, deck, side, age_group, CryoSleep, Destination, traveling_alone),
+                as.factor))  %>%
+  mutate(across(where(is.numeric), ~ scale(.)[,1]))
+```
+
+### Exercise 12
+
+Write up your analyses thus far in one or two paragraphs. Describe what you have learned about the passengers on the Spaceship Titanic. Describe the relationships you observed between variables. Which features do you think may be the best predictors of transported status? Why or why not?
+
+Starting from the raw data set there wasn't a lot of cleaning and tidying to do from the start. Not that much of the data was missing and even with the missing data I was able to remove some rows that were unusable and also input data for missing values that closely related to other values of similar rows that had all the relevant data. From there was looking into the variables and their distribution as well as their relationship with other variables. Creating to analyze the data, some note able relationships I came across were the variables of Cryo-sleep and transportation. It was apparent that individuals in Cryo-sleep were more likely to be transported to another dimension and those that were not in Cryo-sleep were more likely to be transporting within the same dimension. The data also made it clear that most people were not spending money during their time on the spaceship and the few that actually did spend their money were generally being transported within the same dimension. Some smaller details in the data showed that depending on the planet that one's destination was played a role on if someone was going to be transported inner dimension or out of their dimension. Another detail was that those traveling alone were more likely to be transporting inner dimension while those traveling out of their dimension was more 50/50 on if they were traveling with company or without. With that being said I think the best variables to predict and individuals transport status would be on total expenditure, their destination, cryo-sleep, and traveling alone. I felt that these variables showed a significant difference in individuals that were transporting inner dimension or out of their dimension.
+
+### Exercises for 234 Students
+
+#### Exercise 13
+
+Split the dataset into training and testing. Use random sampling. Make sure that $80\%$ of observations are in the training set and the remaining $20\%$ in the testing set.
+
+#### Exercise 14
+
+Using *k*-fold cross-validation with *k* of 5, tune two models:
+
+1.  A random forest;
+2.  An elastic net.
+
+#### Exercise 15
+
+Select your best **random forest** model and use it to predict your testing set. Present the following:
+
+-   Testing accuracy;
+
+-   Testing ROC curve (and area under the ROC curve);
+
+-   Confusion matrix;
+
+-   Variable importance plot.
+
+#### Exercise 16
+
+Write up your conclusions in one to two paragraphs. Answer the following: How did your models do? Are you happy with their performance? Is there another model (besides these two) that you would be interested in trying? Which features ended up being the most important in terms of predicting whether or not a passenger would be transported?
